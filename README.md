@@ -38,6 +38,178 @@ jenkins-automation/
 │   ├── setup_firewall.sh
 │   └── run_demo_job.Jenkinsfile
 ```
+---
+## file-setup.py
+
+```python
+import os
+
+# Base directory
+base_path = "/home/lilia/VIDEOS/jenkins-automation"
+
+# File structure and content mapping
+files = {
+    "terraform/main.tf": '''
+resource "aws_instance" "jenkins_master" {
+  ami           = "ami-0c2b8ca1dad447f8a"
+  instance_type = "t2.medium"
+  key_name      = var.key_pair_name
+  tags = {
+    Name = "jenkins-master"
+  }
+}
+''',
+    "terraform/variables.tf": '''
+variable "key_pair_name" {
+  description = "Name of the AWS key pair"
+  type        = string
+}
+''',
+    "terraform/provider.tf": '''
+provider "aws" {
+  region = "us-east-1"
+}
+''',
+    "terraform/terraform.tfvars": '''
+key_pair_name = "your-aws-keypair-name"
+''',
+    "terraform/outputs.tf": '''
+output "jenkins_master_public_ip" {
+  value = aws_instance.jenkins_master.public_ip
+}
+''',
+    "nginx/jenkins.conf": '''
+upstream jenkins {
+  keepalive 32;
+  server 127.0.0.1:8080;
+}
+
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  '' close;
+}
+
+server {
+  listen 80;
+  server_name jenkins.lilianedevops.online;
+
+  root /var/run/jenkins/war/;
+  access_log /var/log/nginx/jenkins.access.log;
+  error_log /var/log/nginx/jenkins.error.log;
+
+  ignore_invalid_headers off;
+
+  location ~ "^/static/[0-9a-fA-F]{8}/(.*)$" {
+    rewrite "^/static/[0-9a-fA-F]{8}/(.*)" /$1 last;
+  }
+
+  location /userContent {
+    root /var/lib/jenkins/;
+    if (!-f $request_filename){
+      rewrite (.*) /$1 last;
+      break;
+    }
+    sendfile on;
+  }
+
+  location / {
+    sendfile off;
+    proxy_pass http://jenkins;
+    proxy_redirect default;
+    proxy_http_version 1.1;
+
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_max_temp_file_size 0;
+    client_max_body_size 10m;
+    client_body_buffer_size 128k;
+    proxy_connect_timeout 90;
+    proxy_send_timeout 90;
+    proxy_read_timeout 90;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_set_header Connection "";
+  }
+}
+''',
+    "certbot/certbot-commands.sh": '''
+#!/bin/bash
+sudo snap install core; sudo snap refresh core
+sudo apt remove certbot -y
+sudo snap install --classic certbot
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+sudo certbot --nginx -d jenkins.lilianedevops.online
+sudo certbot renew --dry-run
+''',
+    "scripts/install_java.sh": '''
+#!/bin/bash
+sudo apt update
+sudo apt install openjdk-17-jdk -y
+''',
+    "scripts/install_jenkins.sh": '''
+#!/bin/bash
+wget -q -O - https://pkg.jenkins.io/debian/jenkins.io-2023.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc
+echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list
+sudo apt update
+sudo apt install jenkins -y
+sudo systemctl enable jenkins
+''',
+    "scripts/install_nginx.sh": '''
+#!/bin/bash
+sudo apt update
+sudo apt install nginx -y
+sudo systemctl start nginx
+sudo systemctl enable nginx
+''',
+    "scripts/setup_firewall.sh": '''
+#!/bin/bash
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+''',
+    "scripts/run_demo_job.Jenkinsfile": '''
+pipeline {
+  agent { label 'linux-agent' }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git 'https://github.com/lily4499/demo-node-app.git'
+      }
+    }
+    stage('Build Docker Image') {
+      steps {
+        script {
+          docker.build('demo-node-app')
+        }
+      }
+    }
+    stage('Run Container') {
+      steps {
+        sh 'docker run -d -p 3000:3000 demo-node-app'
+      }
+    }
+  }
+}
+'''
+}
+
+# Create directories and files
+for relative_path, content in files.items():
+    full_path = os.path.join(base_path, relative_path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, "w") as f:
+        f.write(content.strip() + "\n")
+
+"All files created successfully in /home/lilia/VIDEOS/jenkins-automation/"
+
+
+```
+
 
 ---
 
